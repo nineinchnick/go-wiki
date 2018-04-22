@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -18,12 +19,15 @@ type Page struct {
 	Body  []byte
 }
 
-func filename(title string) string {
-	return "data/" + html.EscapeString(title) + ".md"
+const frontPage = "FrontPage"
+const dataDir = "data"
+
+func filename(dataDir, title string) string {
+	return path.Join(dataDir, html.EscapeString(title)+".md")
 }
 
-func (p *Page) save() error {
-	filename := filename(p.Title)
+func (p *Page) save(dataDir string) error {
+	filename := filename(dataDir, p.Title)
 	err := ioutil.WriteFile(filename, p.Body, 0600)
 	if err != nil {
 		log.Printf("ERROR Saving %s", filename)
@@ -31,8 +35,8 @@ func (p *Page) save() error {
 	return err
 }
 
-func loadPage(title string) (*Page, error) {
-	filename := filename(title)
+func loadPage(dataDir, title string) (*Page, error) {
+	filename := filename(dataDir, title)
 	body, err := ioutil.ReadFile(filename)
 	if err != nil {
 		log.Printf("INFO Missing file %s", filename)
@@ -48,29 +52,26 @@ type Context struct {
 
 var pageTitle = regexp.MustCompile("\\[([a-zA-Z0-9]+)\\]")
 
-const frontPage = "FrontPage"
+func linkPages(body []byte, baseUrl string) template.HTML {
+	return template.HTML(pageTitle.ReplaceAllFunc(body, func(title []byte) []byte {
+		return []byte(fmt.Sprintf("<a href=\"%s%s\">%s</a>", baseUrl, title[1:len(title)-1], title[1:len(title)-1]))
+	}))
+}
 
-var funcMap = template.FuncMap{
-	"linkPages": func(body []byte, baseUrl string) template.HTML {
-		return template.HTML(pageTitle.ReplaceAllFunc(body, func(title []byte) []byte {
-			return []byte(fmt.Sprintf("<a href=\"%s%s\">%s</a>", baseUrl, title[1:len(title)-1], title[1:len(title)-1]))
-		}))
-	},
-	"autoIndex": func(baseUrl string) template.HTML {
-		allfiles, _ := filepath.Glob("data/*.md")
-		files := make([]string, 0)
-		for _, v := range allfiles {
-			if v != "" && v != frontPage {
-				basename := filepath.Base(v)
-				name := strings.TrimSuffix(basename, filepath.Ext(basename))
-				files = append(files, name)
-			}
+func autoIndex(dataDir, baseUrl string) template.HTML {
+	allfiles, _ := filepath.Glob(path.Join(dataDir, "*.md"))
+	files := make([]string, 0)
+	for _, v := range allfiles {
+		if v != "" && v != frontPage {
+			basename := filepath.Base(v)
+			name := strings.TrimSuffix(basename, filepath.Ext(basename))
+			files = append(files, name)
 		}
-		t := fmt.Sprintf("{{if .}}<ul>{{range .}}<li><a href=\"%s{{.}}\">{{.}}</a></li>{{end}}</ul>{{else}}No pages{{end}}", baseUrl)
-		var result bytes.Buffer
-		template.Must(template.New("main").Parse(t)).Execute(&result, files)
-		return template.HTML(result.String())
-	},
+	}
+	t := fmt.Sprintf("{{if .}}<ul>{{range .}}<li><a href=\"%s{{.}}\">{{.}}</a></li>{{end}}</ul>{{else}}No pages{{end}}", baseUrl)
+	var result bytes.Buffer
+	template.Must(template.New("main").Parse(t)).Execute(&result, files)
+	return template.HTML(result.String())
 }
 
 var templates = make(map[string]*template.Template)
@@ -86,7 +87,12 @@ func loadTemplates() {
 		panic(err)
 	}
 
-	mainTemplate := template.New("main").Funcs(funcMap)
+	mainTemplate := template.New("main").Funcs(template.FuncMap{
+		"linkPages": linkPages,
+		"autoIndex": func(baseUrl string) template.HTML {
+			return autoIndex(dataDir, baseUrl)
+		},
+	})
 
 	for _, file := range includeFiles {
 		fileName := filepath.Base(file)
@@ -107,7 +113,7 @@ func renderTemplate(w http.ResponseWriter, tmpl string, c *Context) {
 var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-9]+)/?$")
 
 func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
-	p, err := loadPage(title)
+	p, err := loadPage(dataDir, title)
 	if err != nil {
 		http.Redirect(w, r, "/edit/"+title, http.StatusFound)
 		return
@@ -116,7 +122,7 @@ func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
 }
 
 func editHandler(w http.ResponseWriter, r *http.Request, title string) {
-	p, err := loadPage(title)
+	p, err := loadPage(dataDir, title)
 	if err != nil {
 		log.Printf("INFO Creating %s", title)
 		p = &Page{Title: title}
@@ -127,7 +133,7 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
-	err := p.save()
+	err := p.save(dataDir)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
