@@ -21,6 +21,7 @@ type Page struct {
 
 const frontPage = "FrontPage"
 const dataDir = "data"
+const templatesDir = "templates"
 
 func filename(dataDir, title string) string {
 	return path.Join(dataDir, html.EscapeString(title)+".md")
@@ -45,11 +46,6 @@ func loadPage(dataDir, title string) (*Page, error) {
 	return &Page{Title: title, Body: body}, nil
 }
 
-type Context struct {
-	Page    *Page
-	BaseUrl string
-}
-
 var pageTitle = regexp.MustCompile("\\[([a-zA-Z0-9]+)\\]")
 
 func linkPages(body []byte, baseUrl string) template.HTML {
@@ -58,35 +54,62 @@ func linkPages(body []byte, baseUrl string) template.HTML {
 	}))
 }
 
-func autoIndex(dataDir, baseUrl string) template.HTML {
-	allfiles, _ := filepath.Glob(path.Join(dataDir, "*.md"))
+func getFileNamesExcept(pattern string, except []string) []string {
+	m := make(map[string]struct{})
+	for _, v := range except {
+		m[v] = struct{}{}
+	}
+	allfiles, _ := filepath.Glob(pattern)
 	files := make([]string, 0)
 	for _, v := range allfiles {
-		if v != "" && v != frontPage {
-			basename := filepath.Base(v)
-			name := strings.TrimSuffix(basename, filepath.Ext(basename))
-			files = append(files, name)
+		basename := filepath.Base(v)
+		name := strings.TrimSuffix(basename, filepath.Ext(basename))
+		if _, invalid := m[name]; invalid {
+			continue
 		}
+		files = append(files, name)
 	}
-	t := fmt.Sprintf("{{if .}}<ul>{{range .}}<li><a href=\"%s{{.}}\">{{.}}</a></li>{{end}}</ul>{{else}}No pages{{end}}", baseUrl)
+	return files
+}
+
+var indexTemplate = template.Must(template.New("main").Parse("{{if .Files}}<ul>{{range .Files}}<li><a href=\"{{ $.BaseUrl }}{{.}}\">{{.}}</a></li>{{end}}</ul>{{else}}No pages{{end}}"))
+
+func autoIndex(dataDir, baseUrl string) template.HTML {
+	context := struct {
+		Files   []string
+		BaseUrl string
+	}{
+		getFileNamesExcept(path.Join(dataDir, "*"), []string{"", frontPage}),
+		baseUrl,
+	}
 	var result bytes.Buffer
-	template.Must(template.New("main").Parse(t)).Execute(&result, files)
+	indexTemplate.Execute(&result, context)
 	return template.HTML(result.String())
 }
 
-var templates = make(map[string]*template.Template)
+var templates map[string]*template.Template
 
-func loadTemplates() {
-	layoutFiles, err := filepath.Glob("templates/*.html")
+func getFiles(pattern string) []string {
+	files, err := filepath.Glob(pattern)
 	if err != nil {
 		panic(err)
 	}
+	return files
+}
 
-	includeFiles, err := filepath.Glob("templates/*.tpl")
-	if err != nil {
-		panic(err)
+func getTemplateFiles(dir string) map[string][]string {
+	layoutFiles := getFiles(path.Join(dir, "*.html"))
+	includeFiles := getFiles(path.Join(dir, "/*.tpl"))
+
+	var files = make(map[string][]string, 0)
+	for _, file := range includeFiles {
+		fileName := filepath.Base(file)
+		files[fileName] = append(layoutFiles, file)
 	}
+	return files
+}
 
+func loadTemplates() map[string]*template.Template {
 	mainTemplate := template.New("main").Funcs(template.FuncMap{
 		"linkPages": linkPages,
 		"autoIndex": func(baseUrl string) template.HTML {
@@ -94,18 +117,25 @@ func loadTemplates() {
 		},
 	})
 
-	for _, file := range includeFiles {
-		fileName := filepath.Base(file)
-		files := append(layoutFiles, file)
+	var templates = make(map[string]*template.Template)
+	for fileName, files := range getTemplateFiles(templatesDir) {
 		templates[fileName] = template.Must(template.Must(mainTemplate.Clone()).ParseFiles(files...))
 	}
+	return templates
 }
 
-func renderTemplate(w http.ResponseWriter, tmpl string, c *Context) {
-	log.Printf("DEBUG Executing template %s on %s with baseUrl: %s", tmpl, c.Page.Title, c.BaseUrl)
-	err := templates[tmpl+".tpl"].ExecuteTemplate(w, tmpl+".tpl", c)
+func renderTemplate(w http.ResponseWriter, tmpl string, page *Page, baseUrl string) {
+	log.Printf("DEBUG Executing template %s on %s with baseUrl: %s", tmpl, page.Title, baseUrl)
+	context := struct {
+		Page    *Page
+		BaseUrl string
+	}{
+		page,
+		baseUrl,
+	}
+	err := templates[tmpl+".tpl"].ExecuteTemplate(w, tmpl+".tpl", context)
 	if err != nil {
-		log.Printf("ERROR Executing template %s on %s: %s", tmpl, c.Page.Title, err)
+		log.Printf("ERROR Executing template %s on %s: %s", tmpl, page.Title, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -118,7 +148,7 @@ func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
 		http.Redirect(w, r, "/edit/"+title, http.StatusFound)
 		return
 	}
-	renderTemplate(w, "view", &Context{Page: p, BaseUrl: "//" + r.Host + "/view/"})
+	renderTemplate(w, "view", p, "//"+r.Host+"/view/")
 }
 
 func editHandler(w http.ResponseWriter, r *http.Request, title string) {
@@ -127,7 +157,7 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 		log.Printf("INFO Creating %s", title)
 		p = &Page{Title: title}
 	}
-	renderTemplate(w, "edit", &Context{Page: p})
+	renderTemplate(w, "edit", p, "")
 }
 
 func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
@@ -163,7 +193,7 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.Handl
 }
 
 func main() {
-	loadTemplates()
+	templates = loadTemplates()
 	http.HandleFunc("/", makeDefaultHandler(viewHandler, frontPage))
 	http.HandleFunc("/view/", makeHandler(viewHandler))
 	http.HandleFunc("/edit/", makeHandler(editHandler))
