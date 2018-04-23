@@ -79,7 +79,7 @@ func autoIndex(dataDir, baseUrl string) template.HTML {
 		Files   []string
 		BaseUrl string
 	}{
-		getFileNamesExcept(path.Join(dataDir, "*"), []string{"", frontPage}),
+		getFileNamesExcept(path.Join(dataDir, "*.md"), []string{"", frontPage}),
 		baseUrl,
 	}
 	var result bytes.Buffer
@@ -142,7 +142,7 @@ func renderTemplate(w http.ResponseWriter, tmpl string, page *Page, baseUrl stri
 
 var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-9]+)/?$")
 
-func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
+func viewHandler(w http.ResponseWriter, r *http.Request, dataDir string, title string) {
 	p, err := loadPage(dataDir, title)
 	if err != nil {
 		http.Redirect(w, r, "/edit/"+title, http.StatusFound)
@@ -151,7 +151,7 @@ func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
 	renderTemplate(w, "view", p, "//"+r.Host+"/view/")
 }
 
-func editHandler(w http.ResponseWriter, r *http.Request, title string) {
+func editHandler(w http.ResponseWriter, r *http.Request, dataDir string, title string) {
 	p, err := loadPage(dataDir, title)
 	if err != nil {
 		log.Printf("INFO Creating %s", title)
@@ -160,7 +160,7 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	renderTemplate(w, "edit", p, "")
 }
 
-func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
+func saveHandler(w http.ResponseWriter, r *http.Request, dataDir string, title string) {
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
 	err := p.save(dataDir)
@@ -171,7 +171,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
 	http.Redirect(w, r, "/view/"+title, http.StatusFound)
 }
 
-func makeDefaultHandler(fn func(http.ResponseWriter, *http.Request, string), defaultTitle string) http.HandlerFunc {
+func makeDefaultHandler(fn func(http.ResponseWriter, *http.Request, string, string), defaultTitle string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("INFO", r.RemoteAddr, r.Proto, r.Method, r.URL, r.UserAgent(), r.Referer())
 		title := defaultTitle
@@ -184,11 +184,11 @@ func makeDefaultHandler(fn func(http.ResponseWriter, *http.Request, string), def
 			}
 			title = m[2]
 		}
-		fn(w, r, title)
+		fn(w, r, dataDir, title)
 	}
 }
 
-func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+func makeHandler(fn func(http.ResponseWriter, *http.Request, string, string)) http.HandlerFunc {
 	return makeDefaultHandler(fn, "")
 }
 

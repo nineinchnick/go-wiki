@@ -1,6 +1,10 @@
 package main
 
 import (
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -18,6 +22,18 @@ func assertEq(t *testing.T, result, expected interface{}) {
 func assertNe(t *testing.T, result, expected interface{}) {
 	if result == expected {
 		t.Errorf("Not expecting %s", result)
+	}
+}
+
+func assertNotContains(t *testing.T, result, expected string) {
+	if strings.Contains(result, expected) {
+		t.Errorf("String %s contains %s", result, expected)
+	}
+}
+
+func assertContains(t *testing.T, result, expected string) {
+	if !strings.Contains(result, expected) {
+		t.Errorf("String %s does not contains %s", result, expected)
 	}
 }
 
@@ -72,4 +88,64 @@ func TestAutoIndex(t *testing.T) {
 
 	expected = "No pages"
 	assertEq(t, string(result), expected)
+}
+
+func TestGetFiles(t *testing.T) {
+	result := getFiles("testdata/*")
+
+	assertEq(t, len(result), 5)
+}
+
+func TestGetTemplateFiles(t *testing.T) {
+	result := getTemplateFiles("testdata")
+
+	assertEq(t, len(result), 1)
+	assertEq(t, result["template.tpl"][0], "testdata/layout.html")
+	assertEq(t, result["template.tpl"][1], "testdata/template.tpl")
+}
+
+func TestViewHandler(t *testing.T) {
+	templates = loadTemplates()
+	request, _ := http.NewRequest("GET", "http://localhost:8080/view/example", nil)
+	w := httptest.NewRecorder()
+	viewHandler(w, request, "testdata", "example")
+	resp := w.Result()
+	body, _ := ioutil.ReadAll(resp.Body)
+	assertEq(t, resp.StatusCode, http.StatusOK)
+	assertNotContains(t, string(body), "form")
+	assertContains(t, string(body), "content\n")
+}
+
+func TestViewHandlerNew(t *testing.T) {
+	templates = loadTemplates()
+	request, _ := http.NewRequest("GET", "http://localhost:8080/view/invalid", nil)
+	w := httptest.NewRecorder()
+	viewHandler(w, request, "testdata", "invalid")
+	resp := w.Result()
+	assertEq(t, resp.StatusCode, http.StatusFound)
+	assertEq(t, resp.Header["Location"][0], "/edit/invalid")
+}
+
+func TestEditHandler(t *testing.T) {
+	templates = loadTemplates()
+	request, _ := http.NewRequest("GET", "http://localhost:8080/edit/example", nil)
+	w := httptest.NewRecorder()
+	editHandler(w, request, "testdata", "example")
+	resp := w.Result()
+	body, _ := ioutil.ReadAll(resp.Body)
+	assertEq(t, resp.StatusCode, http.StatusOK)
+	assertContains(t, string(body), "form")
+	assertContains(t, string(body), "content\n")
+}
+
+func TestEditHandlerNew(t *testing.T) {
+	templates = loadTemplates()
+	request, _ := http.NewRequest("GET", "http://localhost:8080/edit/invalid", nil)
+	w := httptest.NewRecorder()
+	editHandler(w, request, "testdata", "invalid")
+	resp := w.Result()
+	body, _ := ioutil.ReadAll(resp.Body)
+	assertEq(t, resp.StatusCode, http.StatusOK)
+	assertContains(t, string(body), "form")
+	assertNotContains(t, string(body), "content\n")
 }
