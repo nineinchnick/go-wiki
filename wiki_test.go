@@ -54,7 +54,7 @@ func TestLoadPageError(t *testing.T) {
 func TestSavePage(t *testing.T) {
 	example := Page{Title: "other_example", Body: []byte("other content\n")}
 
-	err := example.save("testdata")
+	err := example.Save("testdata")
 	assertEq(t, err, nil)
 
 	result, _ := loadPage("testdata", "other_example")
@@ -64,7 +64,7 @@ func TestSavePage(t *testing.T) {
 func TestSavePageError(t *testing.T) {
 	example := Page{Title: "other_example", Body: []byte("other content\n")}
 
-	err := example.save("invalid")
+	err := example.Save("invalid")
 
 	assertNe(t, err, nil)
 }

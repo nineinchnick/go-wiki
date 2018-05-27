@@ -14,6 +14,7 @@ import (
 	"strings"
 )
 
+// Page represents an article
 type Page struct {
 	Title string
 	Body  []byte
@@ -27,7 +28,8 @@ func filename(dataDir, title string) string {
 	return path.Join(dataDir, html.EscapeString(title)+".md")
 }
 
-func (p *Page) save(dataDir string) error {
+// Save makes changes persistent
+func (p *Page) Save(dataDir string) error {
 	filename := filename(dataDir, p.Title)
 	err := ioutil.WriteFile(filename, p.Body, 0600)
 	if err != nil {
@@ -48,9 +50,9 @@ func loadPage(dataDir, title string) (*Page, error) {
 
 var pageTitle = regexp.MustCompile("\\[([a-zA-Z0-9]+)\\]")
 
-func linkPages(body []byte, baseUrl string) template.HTML {
+func linkPages(body []byte, baseURL string) template.HTML {
 	return template.HTML(pageTitle.ReplaceAllFunc(body, func(title []byte) []byte {
-		return []byte(fmt.Sprintf("<a href=\"%s%s\">%s</a>", baseUrl, title[1:len(title)-1], title[1:len(title)-1]))
+		return []byte(fmt.Sprintf("<a href=\"%s%s\">%s</a>", baseURL, title[1:len(title)-1], title[1:len(title)-1]))
 	}))
 }
 
@@ -72,15 +74,15 @@ func getFileNamesExcept(pattern string, except []string) []string {
 	return files
 }
 
-var indexTemplate = template.Must(template.New("main").Parse("{{if .Files}}<ul>{{range .Files}}<li><a href=\"{{ $.BaseUrl }}{{.}}\">{{.}}</a></li>{{end}}</ul>{{else}}No pages{{end}}"))
+var indexTemplate = template.Must(template.New("main").Parse("{{if .Files}}<ul>{{range .Files}}<li><a href=\"{{ $.BaseURL }}{{.}}\">{{.}}</a></li>{{end}}</ul>{{else}}No pages{{end}}"))
 
-func autoIndex(dataDir, baseUrl string) template.HTML {
+func autoIndex(dataDir, baseURL string) template.HTML {
 	context := struct {
 		Files   []string
-		BaseUrl string
+		BaseURL string
 	}{
 		getFileNamesExcept(path.Join(dataDir, "*.md"), []string{"", frontPage}),
-		baseUrl,
+		baseURL,
 	}
 	var result bytes.Buffer
 	indexTemplate.Execute(&result, context)
@@ -112,8 +114,8 @@ func getTemplateFiles(dir string) map[string][]string {
 func loadTemplates() map[string]*template.Template {
 	mainTemplate := template.New("main").Funcs(template.FuncMap{
 		"linkPages": linkPages,
-		"autoIndex": func(baseUrl string) template.HTML {
-			return autoIndex(dataDir, baseUrl)
+		"autoIndex": func(baseURL string) template.HTML {
+			return autoIndex(dataDir, baseURL)
 		},
 	})
 
@@ -124,14 +126,14 @@ func loadTemplates() map[string]*template.Template {
 	return templates
 }
 
-func renderTemplate(w http.ResponseWriter, tmpl string, page *Page, baseUrl string) {
-	log.Printf("DEBUG Executing template %s on %s with baseUrl: %s", tmpl, page.Title, baseUrl)
+func renderTemplate(w http.ResponseWriter, tmpl string, page *Page, baseURL string) {
+	log.Printf("DEBUG Executing template %s on %s with baseURL: %s", tmpl, page.Title, baseURL)
 	context := struct {
 		Page    *Page
-		BaseUrl string
+		BaseURL string
 	}{
 		page,
-		baseUrl,
+		baseURL,
 	}
 	err := templates[tmpl+".tpl"].ExecuteTemplate(w, tmpl+".tpl", context)
 	if err != nil {
@@ -163,7 +165,7 @@ func editHandler(w http.ResponseWriter, r *http.Request, dataDir string, title s
 func saveHandler(w http.ResponseWriter, r *http.Request, dataDir string, title string) {
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
-	err := p.save(dataDir)
+	err := p.Save(dataDir)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
