@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 // Page represents an article
@@ -33,16 +35,16 @@ func (p *Page) Save(dataDir string) error {
 	filename := filename(dataDir, p.Title)
 	err := ioutil.WriteFile(filename, p.Body, 0600)
 	if err != nil {
-		log.Printf("ERROR Saving %s", filename)
+		log.Printf("ERROR Saving %s: %s", filename, err)
 	}
-	return err
+	return errors.Wrap(err, "Saving failed")
 }
 
 func loadPage(dataDir, title string) (*Page, error) {
 	filename := filename(dataDir, title)
 	body, err := ioutil.ReadFile(filename)
 	if err != nil {
-		log.Printf("INFO Missing file %s", filename)
+		log.Printf("INFO Missing file %s: %s", filename, err)
 		return nil, err
 	}
 	return &Page{Title: title, Body: body}, nil
